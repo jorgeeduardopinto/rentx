@@ -2,8 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { StatusBar, StyleSheet, BackHandler } from 'react-native';
 import { RFValue } from 'react-native-responsive-fontsize';
+import { Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from 'styled-components/native';
+import NetInfo, { useNetInfo } from '@react-native-community/netinfo';
+import { synchronize } from '@nozbe/watermelondb/sync';
+
+import { database } from '../../database';
+import { api } from '../../services/api';
 
 import { RectButton, PanGestureHandler } from 'react-native-gesture-handler';
 
@@ -17,10 +23,10 @@ import Animated, {
 const ButtonAnimated = Animated.createAnimatedComponent(RectButton);
 
 import Logo from '../../assets/logo.svg';
-import { api } from '../../services/api';
 import { CarDTO } from '../../dtos/CarDTO';
 
 import { Car } from '../../components/Car';
+import { Car as ModelCar } from '../../database/models/Car';
 import { LoadAnimation } from '../../components/LoadAnimation';
 
 import {
@@ -41,11 +47,15 @@ type NavigationProps = {
 
 
 export function Home() {
-  const [cars, setCars] = useState<CarDTO[]>([])
+  const [cars, setCars] = useState<ModelCar[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const netInfo = useNetInfo();
+
+  /*
   const positionY = useSharedValue(0);
   const positionX = useSharedValue(0);
+  
 
   const myCarsButtonStyle = useAnimatedStyle(() => {
     return {
@@ -56,6 +66,7 @@ export function Home() {
     }
   })
 
+ 
   const onGestureEvent = useAnimatedGestureHandler({
     onStart(_, ctx: any){
       ctx.positionX = positionX.value;
@@ -70,6 +81,7 @@ export function Home() {
       positionY.value = withSpring(0);
     }
   });
+  */
 
   const navigation = useNavigation<NavigationProps>();
 
@@ -83,22 +95,55 @@ export function Home() {
     navigation.navigate('MyCars');
   }
 
+  async function offlineSynchronize(){
+    await synchronize({
+      database,
+      pullChanges: async ({ lastPulledAt }) => {
+        const response = await api
+        .get(`cars/sync/pull?lastPulledVersion=${lastPulledAt || 0}`);
+        const { changes, latestVersion } = response.data;
+        console.log(changes)
+        return { changes, timestamp: latestVersion }
+      },
+      pushChanges: async ({ changes }) => {
+        const user = changes.users;
+        await api.post('/users/sync', user).catch(console.log)
+      }
+    });
+  }
+
   useEffect(() => {
+    let isMounted = true;
+
     async function fetchCars () {
       try {
-        const response = await api.get('/cars');
-        setCars(response.data);
-        
+        const carCollection = database.get<ModelCar>('cars');
+        const cars = await carCollection.query().fetch();
+
+        if(isMounted){
+          setCars(cars);
+        }
       } catch (error) {
         console.log(error);
       } finally {
-        setLoading(false);
+        if(isMounted){
+          setLoading(false);
+        }
       }
       
     }
 
     fetchCars();
+    return () => {
+      isMounted = false;
+    };
   }, [])
+
+  useEffect(() => {
+    if(netInfo.isConnected === true){
+      offlineSynchronize();
+    }
+  }, [netInfo.isConnected])
 
   useEffect(() => {
     BackHandler.addEventListener('hardwareBackPress', () => {
@@ -136,6 +181,8 @@ export function Home() {
             />}
         />
         }
+        {
+        /* 
         <PanGestureHandler onGestureEvent={onGestureEvent}>
           <Animated.View
             style={[
@@ -159,10 +206,14 @@ export function Home() {
             </ButtonAnimated>
           </Animated.View>
         </PanGestureHandler>
+        */
+        }
+        
     </Container>
   );
 }
 
+/*
 const styles = StyleSheet.create({
   button: {
     width: 60,
@@ -172,3 +223,4 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   }
 })
+*/
